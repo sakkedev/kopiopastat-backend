@@ -178,7 +178,7 @@ app = FastAPI()
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "https://kopiopastat.org"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type","Set-Cookie", "Authorization"],
@@ -559,7 +559,7 @@ def get_image(request: Request, id: int, filename: str):
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Image not found")
     response = FileResponse(path=path, media_type='image/jpeg' if filename.endswith('.jpg') else 'image/png')
-    response.headers["Access-Control-Allow-Origin"] = "http://localhost:3000"
+    response.headers["Access-Control-Allow-Origin"] = "https://kopiopastat.org"
     response.headers["Access-Control-Allow-Credentials"] = "true"
     return response
 

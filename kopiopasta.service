@@ -1,0 +1,12 @@
+[Unit]
+Description=Kopiopasta API
+After=network.target
+
+[Service]
+User=your_user
+WorkingDirectory=/path/to/your/app
+ExecStart=/path/to/venv/bin/uvicorn kopiopasta_api:app --host 127.0.0.1 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

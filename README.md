@@ -27,6 +27,37 @@ This is a FastAPI-based web server for managing kopiopasta entries stored in `ko
 2. The API will be available at the specified address (e.g., `http://127.0.0.1:8000`).
 3. Interactive API docs at `http://127.0.0.1:PORT/docs` (replace PORT with the actual port).
 
+## Production Deployment on Debian VPS with Nginx
+
+To run both backend and frontend on the same VPS under `https://kopiopastat.org`:
+
+1. **Install Nginx and Certbot:**
+   ```
+   sudo apt update
+   sudo apt install nginx certbot python3-certbot-nginx
+   ```
+
+2. **Obtain SSL Certificate:**
+   ```
+   sudo certbot --nginx -d kopiopastat.org
+   ```
+
+3. **Configure Nginx:**
+   - Place the provided `nginx.conf` in `/etc/nginx/sites-available/kopiopastat.org`.
+   - Enable the site: `sudo ln -s /etc/nginx/sites-available/kopiopastat.org /etc/nginx/sites-enabled/`
+   - Remove default: `sudo rm /etc/nginx/sites-enabled/default`
+   - Test config: `sudo nginx -t`
+   - Reload: `sudo systemctl reload nginx`
+
+4. **Run Backend with Systemd:**
+   - Place `kopiopasta.service` in `/etc/systemd/system/`.
+   - Enable and start: `sudo systemctl enable kopiopasta && sudo systemctl start kopiopasta`
+
+5. **Build and Serve Frontend:**
+   - Assuming frontend is a React app, build it: `npm run build`
+   - Copy build files to `/var/www/kopiopastat.org/html/`
+   - Nginx will serve static files and proxy API requests to the backend.
+
 ## Authentication
 
 Privileged endpoints (delete, logout) require a Bearer token obtained via `/login`. Tokens expire after 7 days of inactivity and are IP-bound.
