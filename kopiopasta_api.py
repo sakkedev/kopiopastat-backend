@@ -284,14 +284,13 @@ class PastaLoader:
             raise ValueError(translate("content_must_be_5_250000_chars"))
         timestamp: int = int(time.time())
         entry: dict[str, str | int | list[dict[str, str | int]]] = self.get(id)
-        #if entry["contents"][-1]["content"] == content:
-        #    return id
+        if entry["contents"][-1]["content"] == content:
+            return id
         with self.data_lock:
-            entry["contents"][-1]["content"] = content
-            """entry["contents"].append({
+            entry["contents"].append({
                 "timestamp": timestamp,
                 "content": content
-            })"""
+            })
         self.save_data()
         return id
 
