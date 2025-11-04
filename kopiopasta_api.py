@@ -312,6 +312,7 @@ class PastaLoader:
     @timeout(10)
     def new_entry(self, title: str, content: str) -> int:
         content = content.rstrip('\n').lstrip('\n')
+        content = content.replace("\r\n", "\n")
         if not title or len(title) > 128:
             raise ValueError(translate("title_must_be_1_128_chars"))
         if not content or len(content) < 5 or len(content) > 250000:
