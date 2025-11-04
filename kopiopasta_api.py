@@ -23,7 +23,7 @@ import io
 
 load_dotenv()
 TOKENS = os.getenv("TOKENS").split(',') if os.getenv("TOKENS") else []
-RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY")
+CAPTCHA_QUESTIONS = json.loads(os.getenv("CAPTCHA_QUESTIONS", "[]"))
 
 # Create necessary directories at startup
 os.makedirs("data", exist_ok=True)
@@ -32,6 +32,7 @@ os.makedirs("data/images", exist_ok=True)
 FILENAME: str = 'data/kopiopasta.json'
 
 user_tokens = {}  # token: {"ip": str, "last_used": float}
+captcha_tokens = {}  # token: {"ip": str, "expiration": float}
 token_lock = threading.Lock()
 
 start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -64,6 +65,9 @@ def clean_expired_tokens():
         to_delete = [t for t, data in user_tokens.items() if now - data["last_used"] > 7 * 24 * 3600]
         for t in to_delete:
             del user_tokens[t]
+        to_delete_captcha = [t for t, data in captcha_tokens.items() if now > data["expiration"]]
+        for t in to_delete_captcha:
+            del captcha_tokens[t]
 
 def get_current_token(request: Request):
     clean_expired_tokens()
@@ -78,6 +82,9 @@ def get_current_token(request: Request):
             raise HTTPException(status_code=401, detail="Token not for this user")
         user_tokens[token]["last_used"] = time.time()
     return token
+
+def get_captcha_token(request: Request):
+    return request.headers.get("X-Captcha")
 
 def log_action(ip: str, action: str, content: str):
     os.makedirs("logs", exist_ok=True)
@@ -97,14 +104,14 @@ def daily_backup_loop():
         time.sleep(24 * 3600)  # 24 hours
         create_daily_backup()
 
-def verify_recaptcha(token: str) -> bool:
-    payload = {
-        'secret': RECAPTCHA_SECRET_KEY,
-        'response': token
-    }
-    response = requests.post('https://www.google.com/recaptcha/api/siteverify', data=payload)
-    result = response.json()
-    return result.get('success', False)
+def verify_captcha(request: Request) -> bool:
+    token: str = request.headers.get("X-Captcha")
+    clean_expired_tokens()
+    with token_lock:
+        if token in captcha_tokens:
+            if captcha_tokens[token]["ip"] == request.client.host and time.time() < captcha_tokens[token]["expiration"]:
+                return True
+    return False
 
 def process_image(entry_id: int, filename: str, file: UploadFile, check_existing: bool = True):
     entry = pastaloader.get(entry_id)
@@ -181,7 +188,7 @@ app.add_middleware(
     allow_origins=["http://localhost:3000", "https://kopiopastat.org"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type","Set-Cookie", "Authorization"],
+    allow_headers=["Content-Type","Set-Cookie", "Authorization", "X-Captcha"],
 )
 
 # Rate limiter
@@ -469,12 +476,10 @@ class EditRequest(BaseModel):
     id: int
     content: str
     title: str
-    # captcha: str
 
 class NewRequest(BaseModel):
     title: str
     content: str
-    # captcha: str
 
 class SuccessResponse(BaseModel):
     message: str
@@ -504,6 +509,17 @@ class SearchResponse(BaseModel):
     title: str
     id: int
     content: str
+
+class CaptchaQuestionResponse(BaseModel):
+    question: str
+    index: int
+
+class CaptchaAnswerRequest(BaseModel):
+    answer: str
+    index: int
+
+class CaptchaAnswerResponse(BaseModel):
+    token: str
 
 # Endpoints
 @app.get("/browse", response_model=BrowseResponse)
@@ -597,8 +613,6 @@ def get_image(request: Request, id: int, filename: str):
 @app.post("/edit", response_model=SuccessResponse)
 @limiter.limit("30/hour")
 def edit(request: Request, req: EditRequest, token: str = Depends(get_current_token)):
-    #if not verify_recaptcha(req.captcha):
-    #    raise HTTPException(status_code=400, detail="Invalid CAPTCHA")
     try:
         entry = pastaloader.get(req.id)
         pastaloader.edit_entry(req.id, req.content, req.title)
@@ -615,8 +629,11 @@ def edit(request: Request, req: EditRequest, token: str = Depends(get_current_to
 @app.post("/new", response_model=SuccessResponse)
 @limiter.limit("10/hour")
 def new_entry(request: Request, title: str = Form(...), content: str = Form(...), file: UploadFile = File(None)):
-    #if not verify_recaptcha(req.captcha):
-    #    raise HTTPException(status_code=400, detail="Invalid CAPTCHA")
+    if not verify_captcha(request):
+        try:
+            get_current_token(request)
+        except HTTPException:
+            raise HTTPException(status_code=400, detail="Invalid CAPTCHA")
     try:
         id: int = pastaloader.new_entry(title, content)
         entry = pastaloader.get(id)
@@ -692,6 +709,11 @@ def delete(request: Request, req: DeleteRequest, token: str = Depends(get_curren
 @app.post("/upload_image", response_model=SuccessResponse)
 @limiter.limit("10/hour")
 def upload_image(request: Request, id: int = Form(...), filename: str = Form(...), file: UploadFile = File(...)):
+    if not verify_captcha(request):
+        try:
+            get_current_token(request)
+        except HTTPException:
+            raise HTTPException(status_code=400, detail="Invalid CAPTCHA")
     try:
         process_image(id, filename, file, check_existing=True)
         entry = pastaloader.get(id)
@@ -720,3 +742,34 @@ def delete_image(request: Request, req: DeleteImageRequest, token: str = Depends
 @limiter.limit("120/minute")
 def data_version(request: Request):
     return {"version": pastaloader.version}
+
+@app.get("/captcha_question", response_model=CaptchaQuestionResponse)
+@limiter.limit("100/minute")
+def captcha_question(request: Request):
+    index = random.randint(0, len(CAPTCHA_QUESTIONS) - 1)
+    question = CAPTCHA_QUESTIONS[index]["question"]
+    return {"question": question, "index": index}
+
+@app.post("/captcha_answer", response_model=CaptchaAnswerResponse)
+@limiter.limit("10/30 minutes")
+def captcha_answer(request: Request, req: CaptchaAnswerRequest):
+    if req.index < 0 or req.index >= len(CAPTCHA_QUESTIONS):
+        raise HTTPException(status_code=400, detail="Invalid index")
+    answers = CAPTCHA_QUESTIONS[req.index]["answers"]
+    if req.answer.lower() in [a.lower() for a in answers]:
+        token = secrets.token_urlsafe(32)
+        ip = request.client.host
+        expiration = time.time() + 28 * 24 * 3600
+        with token_lock:
+            captcha_tokens[token] = {"ip": ip, "expiration": expiration}
+        return {"token": token}
+    else:
+        raise HTTPException(status_code=400, detail="Incorrect answer")
+
+@app.get("/verify_captcha")
+@limiter.limit("100/minute")
+def verify_captcha_endpoint(request: Request):
+    if verify_captcha(request):
+        return {"valid": True}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid CAPTCHA")

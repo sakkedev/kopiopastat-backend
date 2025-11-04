@@ -10,8 +10,7 @@ This is a FastAPI-based web server for managing kopiopasta entries stored in `ko
 ## Setup
 
 1. Copy `.env.example` to `.env` and set your desired TOKENS value (e.g., a comma-separated list of strong passwords for authentication).
-2. Set your reCAPTCHA secret key in `.env` (obtain from Google reCAPTCHA admin console).
-3. Ensure `kopiopasta.json` is in the same directory (or create an empty list `[]` if starting fresh).
+2. Ensure `kopiopasta.json` is in the same directory (or create an empty list `[]` if starting fresh).
 
 ## Running the Server
 
@@ -64,7 +63,7 @@ Privileged endpoints (delete, logout) require a Bearer token obtained via `/logi
 
 ## CAPTCHA
 
-CAPTCHA verification is set up for editing and creating entries but is currently disabled in the code.
+CAPTCHA verification is required for editing and creating entries. CAPTCHA token is passed in the X-Captcha header.
 
 ## Logging and Backups
 
@@ -81,18 +80,4 @@ CAPTCHA verification is set up for editing and creating entries but is currently
 - GET `/get_by_order?order=0`: Get entry by its alphabetical order index (limited to 100 per minute).
 - GET `/random`: Get a random entry, includes filename if image exists (null otherwise) (limited to 120 per minute).
 - GET `/history?id=1`: Get full history of an entry (limited to 50 per minute).
-- GET `/search?q=query`: Search for entries by title or content (prioritizes title matches, ignores capitalization and special characters, minimum 3 characters, returns up to 5 best matches) (limited to 100 per minute).
-- GET `/recent_edits?start=0&end=10`: Get recent edits and creations, sorted by timestamp descending (maximum 100 items) (limited to 100 per minute).
-- GET `/download_backup`: Download the kopiopasta.json file as backup (limited to 5 per hour).
-- GET `/images/{id}/{filename}`: Serve image file for an entry (used in <img src=""> tags) (limited to 1000 per minute).
-- GET `/data_version`: Get the current data version number (limited to 120 per minute).
-- POST `/login`: Authenticate with code from .env (JSON body: {"code": "your_token"}) (limited to 50 per hour).
-- POST `/new`: Create new entry (form data: title, content, optional file). Image must be <1MB, JPG/PNG/AVIF (converted to JPG) (limited to 10 per hour).
-- POST `/upload_image`: Upload an image for an entry (form data: id, filename, file). Image must be <1MB, JPG/PNG/AVIF (converted to JPG), entry must exist and not have an image already (limited to 10 per hour).
-
-### Authenticated Endpoints (Require Bearer Token)
-
-- POST `/delete`: Delete content or whole entry by timestamp (JSON body: {"id": 1, "timestamp": 1234567890}) (limited to 20 per hour).
-- POST `/logout`: Invalidate the current token (limited to 50 per hour).
-- POST `/edit`: Edit an entry (JSON body: {"id": 1, "content": "new content", "title": "new title"}) (limited to 30 per hour).
-- POST `/delete_image`: Delete the image for an entry (JSON body: {"id": 1}). Removes image from filesystem and JSON (limited to 10 per hour).
+- GET `/search?q=query`: Search for entries by title or content (prioritizes title matches, ignores capitalization and special characters, minimum 3 characters, returns up to 5 best matches) (limited
