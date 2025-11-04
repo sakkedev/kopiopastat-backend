@@ -330,13 +330,20 @@ class PastaLoader:
     @timeout(10)
     def search(self, q: str) -> list[dict[str, str | int]]:
         normalized_query = self.normalize_text(q)
+        words: list[str] = normalized_query.split()
         matches: list[tuple[int, dict[str, str | int]]] = []
         for item in self.normalized_data:
             score = 5 if item["title"].startswith(normalized_query) else \
                 4 if item["content"].startswith(normalized_query) else \
-                2 if normalized_query in item["title"] else \
-                1 if normalized_query in item["content"] else\
+                3 if normalized_query in item["title"] else \
+                2 if normalized_query in item["content"] else\
                 0
+            if score == 0:
+                score = 1
+                for word in words:
+                    if word not in item["content"].split():
+                        score = 0
+                        break
             if score > 0:
                 entry = self.get(item["id"])
                 matches.append((score, {"title": entry["title"], "id": item["id"], "content": entry["contents"][-1]["content"]}))
