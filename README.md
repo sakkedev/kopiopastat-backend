@@ -75,7 +75,7 @@ CAPTCHA verification is set up for editing and creating entries but is currently
 
 ### Public Endpoints
 
-- GET `/browse?start=0&end=10`: Browse entries in alphabetical order (Finnish alphabet), returns title, id, and latest content (limited to 30 per minute).
+- GET `/browse?start=0&end=10`: Browse entries in alphabetical order (Finnish alphabet), returns version and contents list with title, id, and latest content (limited to 30 per minute).
 - GET `/pasta/{id}`: Get latest content for an entry, includes filename if image exists (null otherwise) (limited to 180 per minute).
 - GET `/pasta/{normalized_title}`: Get latest content for an entry by its normalized title, includes filename if image exists (null otherwise) (limited to 180 per minute).
 - GET `/get_by_order?order=0`: Get entry by its alphabetical order index (limited to 100 per minute).
@@ -85,13 +85,14 @@ CAPTCHA verification is set up for editing and creating entries but is currently
 - GET `/recent_edits?start=0&end=10`: Get recent edits and creations, sorted by timestamp descending (maximum 100 items) (limited to 100 per minute).
 - GET `/download_backup`: Download the kopiopasta.json file as backup (limited to 5 per hour).
 - GET `/images/{id}/{filename}`: Serve image file for an entry (used in <img src=""> tags) (limited to 1000 per minute).
+- GET `/data_version`: Get the current data version number (limited to 120 per minute).
 - POST `/login`: Authenticate with code from .env (JSON body: {"code": "your_token"}) (limited to 50 per hour).
 - POST `/new`: Create new entry (form data: title, content, optional file). Image must be <1MB, JPG/PNG/AVIF (converted to JPG) (limited to 10 per hour).
-- POST `/edit`: Edit an entry (JSON body: {"id": 1, "content": "new content"}) (limited to 30 per hour).
 - POST `/upload_image`: Upload an image for an entry (form data: id, filename, file). Image must be <1MB, JPG/PNG/AVIF (converted to JPG), entry must exist and not have an image already (limited to 10 per hour).
 
 ### Authenticated Endpoints (Require Bearer Token)
 
 - POST `/delete`: Delete content or whole entry by timestamp (JSON body: {"id": 1, "timestamp": 1234567890}) (limited to 20 per hour).
 - POST `/logout`: Invalidate the current token (limited to 50 per hour).
+- POST `/edit`: Edit an entry (JSON body: {"id": 1, "content": "new content", "title": "new title"}) (limited to 30 per hour).
 - POST `/delete_image`: Delete the image for an entry (JSON body: {"id": 1}). Removes image from filesystem and JSON (limited to 10 per hour).

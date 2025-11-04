@@ -202,6 +202,7 @@ class PastaLoader:
         self.normalize_data()
         self.alphabetical_order: list[dict[str, str | int | list[dict[str, str | int]]]] = []
         self.organize_data()
+        self.version: int = 1
 
     @timeout(10)
     def normalize_data(self):
@@ -278,20 +279,27 @@ class PastaLoader:
         return result
 
     @timeout(10)
-    def edit_entry(self, id, content: str) -> int:
+    def edit_entry(self, id, content: str, title: str) -> int:
         content = content.rstrip('\n').lstrip('\n')
         if not content or len(content) < 5 or len(content) > 250000:
             raise ValueError(translate("content_must_be_5_250000_chars"))
         timestamp: int = int(time.time())
         entry: dict[str, str | int | list[dict[str, str | int]]] = self.get(id)
+        title: str = title or entry["title"]
+        if entry["title"] != title:
+            with self.data_lock:
+                entry["title"] = title
+            self.version += 1
         if entry["contents"][-1]["content"] == content:
             return id
+
         with self.data_lock:
             entry["contents"].append({
                 "timestamp": timestamp,
                 "content": content
             })
         self.save_data()
+        self.version += 1
         return id
 
     @timeout(10)
@@ -316,6 +324,7 @@ class PastaLoader:
                 }]
             })
         self.save_data()
+        self.version += 1
         return new_id
 
     @timeout(10)
@@ -387,6 +396,7 @@ class PastaLoader:
                 self.data.remove(entry)
 
         self.save_data()
+        self.version += 1
         if not entry["contents"]:
             return "article", deleted_content
         else:
@@ -404,6 +414,7 @@ class PastaLoader:
         with self.data_lock:
             del entry["image"]
         self.save_data()
+        self.version += 1
 
 
 
@@ -420,10 +431,14 @@ if not os.path.exists(backup_filename):
 threading.Thread(target=daily_backup_loop, daemon=True).start()
 
 # Models
-class BrowseResponse(BaseModel):
+class ContentItem(BaseModel):
     title: str
     id: int
     content: str
+
+class BrowseResponse(BaseModel):
+    version: int
+    contents: list[ContentItem]
 
 class GetResponse(BaseModel):
     title: str
@@ -446,6 +461,7 @@ class HistoryResponse(BaseModel):
 class EditRequest(BaseModel):
     id: int
     content: str
+    title: str
     # captcha: str
 
 class NewRequest(BaseModel):
@@ -474,12 +490,21 @@ class DeleteRequest(BaseModel):
 class DeleteImageRequest(BaseModel):
     id: int
 
+class DataVersionResponse(BaseModel):
+    version: int
+
+class SearchResponse(BaseModel):
+    title: str
+    id: int
+    content: str
+
 # Endpoints
-@app.get("/browse", response_model=list[BrowseResponse])
+@app.get("/browse", response_model=BrowseResponse)
 @limiter.limit("30/minute")
 def browse(request: Request, start: int = Query(..., ge=0), end: int = Query(..., ge=0)):
     try:
-        return pastaloader.browse(start, end)
+        contents = pastaloader.browse(start, end)
+        return {"version": pastaloader.version, "contents": contents}
     except (ValueError, TimeoutError) as e:
         if isinstance(e, TimeoutError):
             raise HTTPException(status_code=408, detail=translate("request_timed_out"))
@@ -559,17 +584,17 @@ def get_image(request: Request, id: int, filename: str):
         raise HTTPException(status_code=404, detail="Image not found")
     response = FileResponse(path=path, media_type='image/jpeg' if filename.endswith('.jpg') else 'image/png')
     response.headers["Access-Control-Allow-Origin"] = "https://kopiopastat.org"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Credentials"] = "true"
     return response
 
 @app.post("/edit", response_model=SuccessResponse)
 @limiter.limit("30/hour")
-def edit(request: Request, req: EditRequest):
+def edit(request: Request, req: EditRequest, token: str = Depends(get_current_token)):
     #if not verify_recaptcha(req.captcha):
     #    raise HTTPException(status_code=400, detail="Invalid CAPTCHA")
     try:
         entry = pastaloader.get(req.id)
-        pastaloader.edit_entry(req.id, req.content)
+        pastaloader.edit_entry(req.id, req.content, req.title)
         updated_entry = pastaloader.get(req.id)
         edit_timestamp = updated_entry["contents"][-1]["timestamp"]
         log_action(request.client.host, "edit", f"Edited '{entry['title']}' (id: {req.id}) at {edit_timestamp} to: {req.content}")
@@ -600,7 +625,7 @@ def new_entry(request: Request, title: str = Form(...), content: str = Form(...)
         else:
             raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/search", response_model=list[BrowseResponse])
+@app.get("/search", response_model=list[SearchResponse])
 @limiter.limit("100/minute")
 def search(request: Request, q: str = Query(..., min_length=3)):
     try:
@@ -640,7 +665,7 @@ def logout(request: Request, token: str = Depends(get_current_token)):
     return {"message": "Logged out"}
 
 @app.post("/delete")
-@limiter.limit("20/hour")
+@limiter.limit("100/hour")
 def delete(request: Request, req: DeleteRequest, token: str = Depends(get_current_token)):
     try:
         entry = pastaloader.get(req.id)
@@ -683,3 +708,8 @@ def delete_image(request: Request, req: DeleteImageRequest, token: str = Depends
             raise HTTPException(status_code=408, detail=translate("request_timed_out"))
         else:
             raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/data_version", response_model=DataVersionResponse)
+@limiter.limit("120/minute")
+def data_version(request: Request):
+    return {"version": pastaloader.version}
