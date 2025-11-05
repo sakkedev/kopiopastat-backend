@@ -651,7 +651,7 @@ def new_entry(request: Request, title: str = Form(...), content: str = Form(...)
             raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/search", response_model=list[SearchResponse])
-@limiter.limit("100/minute")
+@limiter.limit("300/minute")
 def search(request: Request, q: str = Query(..., min_length=3)):
     try:
         return pastaloader.search(q)
