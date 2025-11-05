@@ -628,7 +628,7 @@ def edit(request: Request, req: EditRequest, token: str = Depends(get_current_to
             raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/new", response_model=SuccessResponse)
-@limiter.limit("10/hour")
+@limiter.limit("25/hour")
 def new_entry(request: Request, title: str = Form(...), content: str = Form(...), file: UploadFile = File(None)):
     if not verify_captcha(request):
         try:
@@ -708,7 +708,7 @@ def delete(request: Request, req: DeleteRequest, token: str = Depends(get_curren
             raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/upload_image", response_model=SuccessResponse)
-@limiter.limit("10/hour")
+@limiter.limit("20/hour")
 def upload_image(request: Request, id: int = Form(...), filename: str = Form(...), file: UploadFile = File(...)):
     if not verify_captcha(request):
         try:
