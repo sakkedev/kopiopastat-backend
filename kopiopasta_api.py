@@ -274,7 +274,8 @@ class PastaLoader:
             raise ValueError(translate("invalid_range"))
         try:
             with self.data_lock:
-                items = self.alphabetical_order[start:end]
+                real_data = [item for item in self.alphabetical_order if item["found_in_google"]]
+                items = real_data
         except IndexError:
             return []
         result = []
