@@ -206,6 +206,8 @@ class PastaLoader:
             self.data: list[dict[str, str | int | list[dict[str, str | int]]]] = json.load(f)
         for item in self.data:
             item["contents"].sort(key=lambda x: x["timestamp"])
+            if "found_in_google" not in item:
+                item["found_in_google"] = True
         self.normalize_data()
         self.alphabetical_order: list[dict[str, str | int | list[dict[str, str | int]]]] = []
         self.organize_data()
@@ -286,7 +288,7 @@ class PastaLoader:
         return result
 
     @timeout(10)
-    def edit_entry(self, id, content: str, title: str) -> int:
+    def edit_entry(self, id, content: str, title: str, found_in_google: bool) -> int:
         content = content.rstrip('\n').lstrip('\n')
         if not content or len(content) < 5 or len(content) > 250000:
             raise ValueError(translate("content_must_be_5_250000_chars"))
@@ -296,6 +298,10 @@ class PastaLoader:
         if entry["title"] != title:
             with self.data_lock:
                 entry["title"] = title
+            self.version += 1
+        if entry["found_in_google"] != found_in_google:
+            with self.data_lock:
+                entry["found_in_google"] = found_in_google
             self.version += 1
         if entry["contents"][-1]["content"] == content:
             return id
@@ -310,7 +316,7 @@ class PastaLoader:
         return id
 
     @timeout(10)
-    def new_entry(self, title: str, content: str) -> int:
+    def new_entry(self, title: str, content: str, found_in_google: bool = False) -> int:
         content = content.rstrip('\n').lstrip('\n')
         content = content.replace("\r\n", "\n")
         if not title or len(title) > 128:
@@ -329,10 +335,12 @@ class PastaLoader:
                 "contents": [{
                     "content": content,
                     "timestamp": int(time.time())
-                }]
+                }],
+                "found_in_google": found_in_google
             })
         self.save_data()
-        self.version += 1
+        if not found_in_google:
+            self.version -= 1
         return new_id
 
     @timeout(10)
@@ -356,7 +364,7 @@ class PastaLoader:
                 entry = self.get(item["id"])
                 matches.append((score, {"title": entry["title"], "id": item["id"], "content": entry["contents"][-1]["content"]}))
         matches.sort(key=lambda x: x[0], reverse=True)
-        result = [match[1] for match in matches[:5]]
+        result = [match[1] for match in matches[:10]]
         return result
 
     @timeout(10)
@@ -373,7 +381,8 @@ class PastaLoader:
                         "timestamp": content["timestamp"],
                         "title": item["title"],
                         "content": content["content"],
-                        "type": event_type
+                        "type": event_type,
+                        "found_in_google": item.get("found_in_google", True)
                     })
                 if "image" in item:
                     all_events.append({
@@ -381,7 +390,8 @@ class PastaLoader:
                         "timestamp": item["image"]["timestamp"],
                         "title": item["title"],
                         "content": item["image"]["filename"],
-                        "type": "image_added"
+                        "type": "image_added",
+                        "found_in_google": item.get("found_in_google", True)
                     })
         all_events.sort(key=lambda x: x["timestamp"], reverse=True)
         try:
@@ -464,6 +474,7 @@ class GetResponse(BaseModel):
     order_index: int
     last_in_order: int
     filename: str | None = None
+    found_in_google: bool
 
 class IdResponse(BaseModel):
     id: int
@@ -477,6 +488,7 @@ class EditRequest(BaseModel):
     id: int
     content: str
     title: str
+    found_in_google: bool = False
 
 class NewRequest(BaseModel):
     title: str
@@ -492,6 +504,7 @@ class RecentEditResponse(BaseModel):
     title: str
     content: str
     type: str
+    found_in_google: bool
 
 class LoginRequest(BaseModel):
     code: str
@@ -551,7 +564,8 @@ def pasta(request: Request, id: int):
             "num_contents": len(entry["contents"]),
             "order_index": order_index,
             "last_in_order": int(order_index == len(pastaloader.alphabetical_order) - 1),
-            "filename": filename
+            "filename": filename,
+            "found_in_google": entry.get("found_in_google", True)
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -578,7 +592,8 @@ def get_random(request: Request):
         "num_contents": len(entry["contents"]),
         "order_index": order_index,
         "last_in_order": int(order_index == len(pastaloader.alphabetical_order) - 1),
-        "filename": filename
+        "filename": filename,
+        "found_in_google": entry.get("found_in_google", True)
     }
 
 @app.get("/history", response_model=HistoryResponse)
@@ -616,7 +631,7 @@ def get_image(request: Request, id: int, filename: str):
 def edit(request: Request, req: EditRequest, token: str = Depends(get_current_token)):
     try:
         entry = pastaloader.get(req.id)
-        pastaloader.edit_entry(req.id, req.content, req.title)
+        pastaloader.edit_entry(req.id, req.content, req.title, req.found_in_google)
         updated_entry = pastaloader.get(req.id)
         edit_timestamp = updated_entry["contents"][-1]["timestamp"]
         log_action(request.client.host, "edit", f"Edited '{entry['title']}' (id: {req.id}) at {edit_timestamp} to: {req.content}")
@@ -629,14 +644,14 @@ def edit(request: Request, req: EditRequest, token: str = Depends(get_current_to
 
 @app.post("/new", response_model=SuccessResponse)
 @limiter.limit("25/hour")
-def new_entry(request: Request, title: str = Form(...), content: str = Form(...), file: UploadFile = File(None)):
+def new_entry(request: Request, title: str = Form(...), content: str = Form(...), file: UploadFile = File(None), found_in_google: bool = Form(False)):
     if not verify_captcha(request):
         try:
             get_current_token(request)
         except HTTPException:
             raise HTTPException(status_code=400, detail="Invalid CAPTCHA")
     try:
-        id: int = pastaloader.new_entry(title, content)
+        id: int = pastaloader.new_entry(title, content, found_in_google)
         entry = pastaloader.get(id)
         create_timestamp = entry["contents"][0]["timestamp"]
         log_action(request.client.host, "new", f"Created new entry '{title}' (id: {id}) at {create_timestamp} with content: {content}")
