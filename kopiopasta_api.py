@@ -275,7 +275,7 @@ class PastaLoader:
         try:
             with self.data_lock:
                 real_data = [item for item in self.alphabetical_order if item["found_in_google"]]
-                items = real_data
+                items = real_data[start:end]
         except IndexError:
             return []
         result = []
